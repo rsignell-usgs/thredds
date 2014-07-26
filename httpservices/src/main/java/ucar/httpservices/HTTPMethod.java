@@ -40,11 +40,10 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.apache.http.*;
 import org.apache.http.auth.AuthScope;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.*;
 import org.apache.http.message.BasicHeader;
 import org.apache.http.message.BasicHttpResponse;
@@ -153,6 +152,10 @@ import static ucar.httpservices.HTTPSession.*;
  * <li> Closing the method (directly or through stream.close())
  * will close the one-shot session created by the method.
  * </ul>
+ * <p/>
+ * It is important to note that as the move to Apache Httpclient 4.3.x,
+ * the HttpRequestBase objects are generally immutable. This means that
+ * the relevant info must be stored and created on demand.
  */
 
 public class HTTPMethod
@@ -168,6 +171,8 @@ public class HTTPMethod
     protected HTTPSession.Methods methodclass = null;
     protected HTTPMethodStream methodstream = null; // wrapper for strm
     protected boolean closed = false;
+
+    // Created on demand
     protected HttpRequestBase request = null;
     protected HttpResponse response = null;
 
@@ -273,8 +278,6 @@ public class HTTPMethod
         if(!localsession && !sessionCompatible(this.legalurl))
             throw new HTTPException("HTTPMethod: session incompatible url: " + this.legalurl);
 
-        if(this.request != null)
-            this.request.releaseConnection();
         this.request = createRequest();
 
         try {
@@ -310,7 +313,6 @@ public class HTTPMethod
                 || code == HttpStatus.SC_PROXY_AUTHENTICATION_REQUIRED) {
                 HTTPCachingProvider.invalidate(scope);
             }
-
             return code;
 
         } catch (Exception ie) {
@@ -318,11 +320,11 @@ public class HTTPMethod
         }
     }
 
-    protected void
+    protected RequestConfig
     configure(HttpRequestBase request)
         throws HTTPException
     {
-        // merge global and local settings.
+        // merge global and local settings; local overrides global.
         Settings merge = new Settings();
         Settings s = session.getGlobalSettings();
         for(String key : s.getNames()) {
@@ -332,22 +334,23 @@ public class HTTPMethod
         for(String key : s.getNames()) {
             merge.setParameter(key, s.getParameter(key));
         }
+        RequestConfig.Builder rb = RequestConfig.custom();
         for(String key : merge.getNames()) {
             Object value = merge.getParameter(key);
-            HttpParams hmp = request.getParams();
-
+            boolean tf = (value instanceof Boolean:(Boolean) value:false);
             if(key.equals(ALLOW_CIRCULAR_REDIRECTS)) {
-                hmp.setParameter(ALLOW_CIRCULAR_REDIRECTS, (Boolean) value);
+                rb.setCircularRedirectsAllowed(tf);
             } else if(key.equals(HANDLE_REDIRECTS)) {
-                hmp.setParameter(HANDLE_REDIRECTS, (Boolean) value);
+                rb.setRedirectsEnabled(tf)
+                rb.setRelativeRedirectsAllowed(tf);
             } else if(key.equals(HANDLE_AUTHENTICATION)) {
-                hmp.setParameter(HANDLE_AUTHENTICATION, (Boolean) value);
+                rb.setAuthenticationEnabled(tf);
             } else if(key.equals(MAX_REDIRECTS)) {
-                hmp.setParameter(MAX_REDIRECTS, (Integer) value);
+                rb.setMaxRedirects((Integer) value);
             } else if(key.equals(SO_TIMEOUT)) {
-                hmp.setParameter(SO_TIMEOUT, (Integer) value);
+                rb.setSocketTimeout((Integer) value);
             } else if(key.equals(CONN_TIMEOUT)) {
-                hmp.setParameter(CONN_TIMEOUT, (Integer) value);
+                rb.setConnectTimeout((Integer) value);
                 // NOTE: Following modifying request, not builder
             } else if(key.equals(USER_AGENT)) {
                 request.setHeader(HEADER_USERAGENT, value.toString());
@@ -355,13 +358,14 @@ public class HTTPMethod
                 request.setHeader(ACCEPT_ENCODING, value.toString());
             } else if(key.equals(PROXY)) {
                 Proxy proxy = (Proxy) value;
-                if(session.sessionClient != null && proxy != null && proxy.host != null) {
+                if(proxy != null && proxy.host != null) {
                     HttpHost httpproxy = new HttpHost(proxy.host, proxy.port);
-                    session.sessionClient.getParams().setParameter(PROXY, httpproxy);
+                    request.setProxy(httpproxy);
                 }
             } else {
                 throw new HTTPException("Unexpected setting name: " + key);
             }
+            return rb.build();
         }
     }
 
@@ -379,13 +383,14 @@ public class HTTPMethod
         if(methodstream != null) {
             try {
                 methodstream.close();
-            } catch (IOException ioe) {/*failure is ok*/}
-            ;
+            } catch (IOException ioe) {
+                throw new IllegalStateException();
+            }
             methodstream = null;
         }
-        if(this.request != null) {
-            this.request.releaseConnection();
-            this.request = null;
+        if(this.response != null) {
+            this.response.
+            this.response = null;
         }
         session.removeMethod(this);
         if(localsession && session != null) {
@@ -404,25 +409,21 @@ public class HTTPMethod
 
     public String getStatusLine()
     {
-        return response == null ? null : response.getStatusLine().toString();
-    }
-
-    public String getRequestLine()
-    {
-        //fix: return (method == null ? null : request.getRequestLine().toString());
-        throw new UnsupportedOperationException("getrequestline not implemented");
+        return this.response == null ? null
+            : this.response.getStatusLine().toString();
     }
 
     public String getPath()
     {
-        return (request == null ? null : request.getURI().toString());
+        return (this.request == null ? null
+            : this.request.getURI().toString());
     }
 
     public boolean canHoldContent()
     {
-        if(request == null)
+        if(this.request == null)
             return false;
-        return !(request instanceof HttpHead);
+        return !(this.request instanceof HttpHead);
     }
 
     public InputStream getResponseBodyAsStream()

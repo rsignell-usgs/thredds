@@ -40,21 +40,18 @@ import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.entity.DeflateDecompressingEntity;
 import org.apache.http.client.entity.GzipDecompressingEntity;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.client.params.AllClientPNames;
-import org.apache.http.client.protocol.*;
+import org.apache.http.client.protocol.ClientContext;
 import org.apache.http.conn.scheme.Scheme;
-import org.apache.http.cookie.Cookie;
-import org.apache.http.impl.client.AbstractHttpClient;
-import org.apache.http.impl.client.DefaultHttpClient;
-import org.apache.http.impl.conn.PoolingClientConnectionManager;
-import org.apache.http.params.SyncBasicHttpParams;
-import org.apache.http.protocol.*;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.conn.PoolingClientConnectionManager;
+import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
+import org.apache.http.protocol.HttpContext;
 
-import javax.net.ssl.SSLException;
 import java.io.IOException;
-import java.io.InterruptedIOException;
 import java.io.UnsupportedEncodingException;
 import java.net.*;
 import java.util.*;
@@ -101,6 +98,17 @@ import static ucar.httpservices.HTTPAuthScope.*;
  * <p/>
  * Finally, note that if the session was created with no url then all method
  * constructions must specify a url.
+ * <p/>
+ * It is important to note that as the move to Apache Httpclient 4.3.x,
+ * the HttpClient objects are generally immutable. This means that
+ * at least this class (HTTPSession) and HTTPMethod must store
+ * the relevant info and create the HttpClient and HttpMethod objects
+ * dynamically. This also means that when a parameter is changed
+ * (Agent, for example), any existing cached HttpClient must be thrown
+ * away and reconstructed using the change. As a rule, the HttpClient
+ * object will be created at the last minute so that multiple parameter
+ * changes can be effected without have to re-create the HttpClient
+ * for each parameter change.
  */
 
 public class HTTPSession
@@ -110,7 +118,7 @@ public class HTTPSession
 
     // Define all the legal properties
     // From class AllClientPNames
-    // Use aliases because in httpclietn 4.3, AllClientPNames is deprecated
+    // Use aliases because in Httpclient 4.3, AllClientPNames is deprecated
 
     static public final String ALLOW_CIRCULAR_REDIRECTS = AllClientPNames.ALLOW_CIRCULAR_REDIRECTS;
     static public final String HANDLE_REDIRECTS = AllClientPNames.HANDLE_REDIRECTS;
@@ -140,10 +148,33 @@ public class HTTPSession
     //////////////////////////////////////////////////////////////////////////
     // Type Declarations
 
-    // Provide an alias for HttpParams
-    static class Settings extends SyncBasicHttpParams
+    /**
+     * Sub-class List<String,Object> for mnemonic convenience.
+     */
+    static class Settings extends HashMap<String, Object>
     {
+        public Settings()
+        {
+        }
+
+        public Set<String>
+        getNames()
+        {
+            return super.keySet();
+        }
+
+
+        public Object getParameter(String param)
+        {
+            return super.get(param);
+        }
+
+        public void setParameter(String param, Object value)
+        {
+            super.put(param, value);
+        }
     }
+
 
     static class Proxy
     {
@@ -169,6 +200,7 @@ public class HTTPSession
 
     // Define a Retry Handler that supports specifiable retries
     // and is optionally verbose.
+    /* TBD for 4.3.x
     static public class RetryHandler
         implements org.apache.http.client.HttpRequestRetryHandler
     {
@@ -225,7 +257,7 @@ public class HTTPSession
             RetryHandler.verbose = tf;
         }
     }
-
+    */
 
     static class GZIPResponseInterceptor implements HttpResponseInterceptor
     {
@@ -276,18 +308,18 @@ public class HTTPSession
     static public org.slf4j.Logger log
         = org.slf4j.LoggerFactory.getLogger(HTTPSession.class);
 
-    static PoolingClientConnectionManager connmgr;
-
-    // Define a set of settings to hold all the
+    // Use simple map to hold all the
     // settable values; there will be one
     // instance for global and one for local.
 
-    static Settings globalsettings;
+    static protected Settings globalsettings;
+    static protected PoolingHttpClientConnectionManager connmgr;
+
     static List<HttpRequestInterceptor> reqintercepts = new ArrayList<HttpRequestInterceptor>();
     static List<HttpResponseInterceptor> rspintercepts = new ArrayList<HttpResponseInterceptor>();
 
     static {
-        connmgr = new PoolingClientConnectionManager();
+        connmgr = new PoolingHttpClientConnectionManager();
         connmgr.getSchemeRegistry().register(
             new Scheme("https", 8443,
                 new CustomSSLProtocolSocketFactory()));
@@ -351,13 +383,6 @@ public class HTTPSession
     static synchronized public int getGlobalThreadCount()
     {
         return connmgr.getMaxTotal();
-    }
-
-    static synchronized public List<Cookie> getGlobalCookies()
-    {
-        AbstractHttpClient client = new DefaultHttpClient(connmgr);
-        List<Cookie> cookies = client.getCookieStore().getCookies();
-        return cookies;
     }
 
     // Timeouts
@@ -433,6 +458,7 @@ public class HTTPSession
         setGlobalCredentialsProvider(scope, provider);
     }
 
+    /* TBD for 4.3.x
     static public int
     getRetryCount()
     {
@@ -444,7 +470,7 @@ public class HTTPSession
     {
         RetryHandler.setRetries(count);
     }
-
+    */
 
     //////////////////////////////////////////////////
     // Static Utility functions
@@ -524,11 +550,7 @@ public class HTTPSession
     putUrlAsString(String content, String url) throws HTTPException
     {
         HTTPMethod m = HTTPFactory.Put(url);
-        try {
-            m.setRequestContent(new StringEntity(content, "application/text", "UTF-8"));
-        } catch (UnsupportedEncodingException uee) {
-            throw new HTTPException(uee);
-        }
+        m.setRequestContent(new StringEntity(content, "UTF-8"));
         int status = m.execute();
         m.close();
         return status;
@@ -621,9 +643,8 @@ public class HTTPSession
     //////////////////////////////////////////////////
     // Instance variables
 
-    protected AbstractHttpClient sessionClient = null;
+
     protected List<ucar.httpservices.HTTPMethod> methodList = new Vector<HTTPMethod>();
-    protected HttpContext execcontext = null; // same instance must be used for all methods
     protected String identifier = "Session";
     protected String legalurl = null;
     protected boolean closed = false;
@@ -631,6 +652,9 @@ public class HTTPSession
     protected HTTPAuthStore authlocal = new HTTPAuthStore();
     // We currently only allow the use of global interceptors
     protected List<Object> intercepts = new ArrayList<Object>(); // current set of interceptors;
+
+    // cached and recreated as needed
+    protected CloseableHttpClient cachedclient = null;
 
     //////////////////////////////////////////////////
     // Constructor(s)
@@ -650,14 +674,6 @@ public class HTTPSession
             throw new HTTPException("Malformed URL: " + url, mue);
         }
         this.legalurl = url;
-        try {
-            sessionClient = new DefaultHttpClient(connmgr);
-            if(TESTING) HTTPSession.track(this);
-            setInterceptors();
-        } catch (Exception e) {
-            throw new HTTPException("url=" + url, e);
-        }
-        this.execcontext = new BasicHttpContext();// do we need to modify?
     }
 
     //////////////////////////////////////////////////
@@ -666,10 +682,13 @@ public class HTTPSession
     synchronized void
     setInterceptors()
     {
-        for(HttpRequestInterceptor hrq : reqintercepts)
-            sessionClient.addRequestInterceptor(hrq);
+        if(cachedclient == null)
+            return;
+        (HttpRequestInterceptor hrq:
+    reqintercepts)
+        cachedclient.addRequestInterceptor(hrq);
         for(HttpResponseInterceptor hrs : rspintercepts)
-            sessionClient.addResponseInterceptor(hrs);
+            cachedclient.addResponseInterceptor(hrs);
     }
 
     synchronized void
@@ -684,10 +703,12 @@ public class HTTPSession
     synchronized void
     clearInterceptor(Object o)
     {
+        if(cachedclient == null)
+            return;
         if(o instanceof HttpResponseInterceptor)
-            sessionClient.removeResponseInterceptorByClass(((HttpResponseInterceptor) o).getClass());
+            cachedclient.removeResponseInterceptorByClass(((HttpResponseInterceptor) o).getClass());
         if(o instanceof HttpRequestInterceptor)
-            sessionClient.removeRequestInterceptorByClass(((HttpRequestInterceptor) o).getClass());
+            cachedclient.removeRequestInterceptorByClass(((HttpRequestInterceptor) o).getClass());
     }
 
     //////////////////////////////////////////////////
@@ -730,25 +751,10 @@ public class HTTPSession
         localsettings.setParameter(MAX_REDIRECTS, n);
     }
 
-    // make package specific
-
-    HttpContext
-    getContext()
-    {
-        return this.execcontext;
-    }
-
-
     HttpClient
     getClient()
     {
-        return this.sessionClient;
-    }
-
-    HttpContext
-    getExecutionContext()
-    {
-        return this.execcontext;
+        return this.cachedclient;
     }
 
     //////////////////////////////////////////////////
@@ -769,14 +775,6 @@ public class HTTPSession
         closed = true;
     }
 
-    public List<Cookie> getCookies()
-    {
-        if(sessionClient == null)
-            return null;
-        List<Cookie> cookies = sessionClient.getCookieStore().getCookies();
-        return cookies;
-    }
-
     synchronized void addMethod(HTTPMethod m)
     {
         if(!methodList.contains(m))
@@ -790,9 +788,9 @@ public class HTTPSession
 
     public void clearState()
     {
-        sessionClient.getCredentialsProvider().clear();
-        sessionClient.getCookieStore().clear();
-        execcontext = new BasicHttpContext();
+        if(cachedclient == null)
+            return;
+        cachedclient.getCredentialsProvider().clear();
         localsettings.clear();
         authlocal.clear();
     }
@@ -873,6 +871,60 @@ public class HTTPSession
         }
     }
 
+    // This provides support for HTTPMethod.setAuthentication method
+    synchronized protected void
+    setAuthentication(HTTPCachingProvider hap)
+    {
+        if(this.cachedclient != null)
+            this.cachedclient.setCredentialsProvider(hap);
+        if(false)
+            this.execcontext.setAttribute(ClientContext.CREDS_PROVIDER, hap);
+    }
+
+    //////////////////////////////////////////////////
+    // Execution Support
+
+    protected HttpResponse
+    execute(HttpRequestBase request)
+        throws IOException
+    {
+        // Ensure that the client related objects exist
+        ensureHttpClient();
+
+        HttpHost target = requestHost();
+        CloseableHttpResponse response = cachedclient.execute(target, request);
+        return response;
+    }
+
+    protected void ensureHttpClient()
+    {
+        if(this.cachedclient != null)
+            return;
+
+/*
+    ssl.TrustManagerFactory.algorithm
+    javax.net.ssl.trustStoreType
+    javax.net.ssl.trustStore
+    javax.net.ssl.trustStoreProvider
+    javax.net.ssl.trustStorePassword
+    ssl.KeyManagerFactory.algorithm
+    javax.net.ssl.keyStoreType
+    javax.net.ssl.keyStore
+    javax.net.ssl.keyStoreProvider
+    javax.net.ssl.keyStorePassword
+    https.protocols
+    https.cipherSuites
+    http.proxyHost
+    http.proxyPort
+    http.nonProxyHosts
+    http.keepAlive
+    http.maxConnections
+    http.agent
+*/
+
+
+    }
+
     //////////////////////////////////////////////////
     // Testing support
 
@@ -885,24 +937,6 @@ public class HTTPSession
     public int getMethodcount()
     {
         return methodList.size();
-    }
-
-    // This provides support for HTTPMethod.setAuthentication method
-    synchronized protected void
-    setAuthentication(HTTPCachingProvider hap)
-    {
-        this.sessionClient.setCredentialsProvider(hap);
-        if(false)
-            this.execcontext.setAttribute(ClientContext.CREDS_PROVIDER, hap);
-    }
-
-    // do an actual execution
-    protected HttpResponse
-    execute(HttpRequestBase request)
-        throws IOException
-    {
-        HttpResponse response = sessionClient.execute(request, this.execcontext);
-        return response;
     }
 
     //////////////////////////////////////////////////
@@ -927,7 +961,7 @@ public class HTTPSession
             sessionList.clear();
             // Rebuild the connection manager
             connmgr.shutdown();
-            connmgr = new PoolingClientConnectionManager();
+            connmgr = new PoolingHttpClientConnectionManager();
             setGlobalThreadCount(DFALTTHREADCOUNT);
         }
     }
@@ -947,7 +981,7 @@ public class HTTPSession
         rq.setPrint(print);
         rs.setPrint(print);
         /* remove any previous */
-        for(int i=reqintercepts.size()-1;i>=0;i++) {
+        for(int i = reqintercepts.size() - 1;i >= 0;i++) {
             HttpRequestInterceptor hr = reqintercepts.get(i);
             if(hr instanceof HTTPUtil.InterceptCommon)
                 reqintercepts.remove(i);
