@@ -43,8 +43,11 @@ import java.util.*;
 
 import org.apache.http.*;
 import org.apache.http.auth.AuthScope;
+import org.apache.http.client.HttpClient;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.*;
+import org.apache.http.impl.client.*;
+import org.apache.http.impl.conn.DefaultProxyRoutePlanner;
 import org.apache.http.message.BasicHeader;
 import org.apache.http.message.BasicHttpResponse;
 import org.apache.http.util.EntityUtils;
@@ -288,11 +291,6 @@ public class HTTPMethod
                 }
             }
 
-            // Apply settings
-            configure(this.request);
-            setcontent(this.request);
-            AuthScope scope = setAuthentication();
-
             //todo: Change the retry handler
             //httpclient.setHttpRequestRetryHandler(myRetryHandler);
             //request.getParams().setParameter(HttpMethodParams.RETRY_HANDLER, new RetryHandler());
@@ -320,55 +318,6 @@ public class HTTPMethod
         }
     }
 
-    protected RequestConfig
-    configure(HttpRequestBase request)
-        throws HTTPException
-    {
-        // merge global and local settings; local overrides global.
-        Settings merge = new Settings();
-        Settings s = session.getGlobalSettings();
-        for(String key : s.getNames()) {
-            merge.setParameter(key, s.getParameter(key));
-        }
-        s = session.getSettings();
-        for(String key : s.getNames()) {
-            merge.setParameter(key, s.getParameter(key));
-        }
-        RequestConfig.Builder rb = RequestConfig.custom();
-        for(String key : merge.getNames()) {
-            Object value = merge.getParameter(key);
-            boolean tf = (value instanceof Boolean:(Boolean) value:false);
-            if(key.equals(ALLOW_CIRCULAR_REDIRECTS)) {
-                rb.setCircularRedirectsAllowed(tf);
-            } else if(key.equals(HANDLE_REDIRECTS)) {
-                rb.setRedirectsEnabled(tf)
-                rb.setRelativeRedirectsAllowed(tf);
-            } else if(key.equals(HANDLE_AUTHENTICATION)) {
-                rb.setAuthenticationEnabled(tf);
-            } else if(key.equals(MAX_REDIRECTS)) {
-                rb.setMaxRedirects((Integer) value);
-            } else if(key.equals(SO_TIMEOUT)) {
-                rb.setSocketTimeout((Integer) value);
-            } else if(key.equals(CONN_TIMEOUT)) {
-                rb.setConnectTimeout((Integer) value);
-                // NOTE: Following modifying request, not builder
-            } else if(key.equals(USER_AGENT)) {
-                request.setHeader(HEADER_USERAGENT, value.toString());
-            } else if(key.equals(COMPRESSION)) {
-                request.setHeader(ACCEPT_ENCODING, value.toString());
-            } else if(key.equals(PROXY)) {
-                Proxy proxy = (Proxy) value;
-                if(proxy != null && proxy.host != null) {
-                    HttpHost httpproxy = new HttpHost(proxy.host, proxy.port);
-                    request.setProxy(httpproxy);
-                }
-            } else {
-                throw new HTTPException("Unexpected setting name: " + key);
-            }
-            return rb.build();
-        }
-    }
-
     /**
      * Calling close will force the method to close, and will
      * force any open stream to terminate. If the session is local,
@@ -388,19 +337,18 @@ public class HTTPMethod
             }
             methodstream = null;
         }
-        if(this.response != null) {
-            this.response.
-            this.response = null;
-        }
-        session.removeMethod(this);
-        if(localsession && session != null) {
-            session.close();
-            session = null;
+        this.response = null;
+        if(session != null) {
+            session.removeMethod(this);
+            if(localsession) {
+                session.close();
+                session = null;
+            }
         }
     }
 
-    //////////////////////////////////////////////////
-    // Accessors
+        //////////////////////////////////////////////////
+        // Accessors
 
     public int getStatusCode()
     {

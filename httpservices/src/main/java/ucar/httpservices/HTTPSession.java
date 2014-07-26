@@ -38,6 +38,7 @@ import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.Credentials;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.HttpClient;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.entity.DeflateDecompressingEntity;
 import org.apache.http.client.entity.GzipDecompressingEntity;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -46,9 +47,8 @@ import org.apache.http.client.params.AllClientPNames;
 import org.apache.http.client.protocol.ClientContext;
 import org.apache.http.conn.scheme.Scheme;
 import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.conn.PoolingClientConnectionManager;
-import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
+import org.apache.http.impl.client.*;
+import org.apache.http.impl.conn.*;
 import org.apache.http.protocol.HttpContext;
 
 import java.io.IOException;
@@ -888,7 +888,10 @@ public class HTTPSession
     execute(HttpRequestBase request)
         throws IOException
     {
-        // Ensure that the client related objects exist
+        // Apply settings
+        setcontent(this.request);
+        AuthScope scope = setAuthentication();
+// Ensure that the client related objects exist
         ensureHttpClient();
 
         HttpHost target = requestHost();
@@ -923,6 +926,72 @@ public class HTTPSession
 */
 
 
+    }
+
+    protected HttpClient
+    configureClient(Settings settings)
+        throws HTTPException
+    {
+        HttpClientBuilder cb = HttpClients.custom();
+        Object value = settings.getParameter(PROXY);
+        if(value != null) {
+            Proxy proxy = (Proxy) value;
+            if(proxy.host != null) {
+                HttpHost httpproxy = new HttpHost(proxy.host, proxy.port);
+                DefaultProxyRoutePlanner routePlanner = new DefaultProxyRoutePlanner(httpproxy);
+                cb.setRoutePlanner(routePlanner);
+            }
+        }
+        return cb.build();
+    }
+
+
+    protected RequestConfig
+    configureRequest(HttpRequestBase request, Settings settings)
+        throws HTTPException
+    {
+
+        RequestConfig.Builder rb = RequestConfig.custom();
+        for(String key : settings.getNames()) {
+            Object value = settings.getParameter(key);
+            boolean tf = (value instanceof Boolean ? (Boolean) value : false);
+            if(key.equals(ALLOW_CIRCULAR_REDIRECTS)) {
+                rb.setCircularRedirectsAllowed(tf);
+            } else if(key.equals(HANDLE_REDIRECTS)) {
+                rb.setRedirectsEnabled(tf);
+                rb.setRelativeRedirectsAllowed(tf);
+            } else if(key.equals(HANDLE_AUTHENTICATION)) {
+                rb.setAuthenticationEnabled(tf);
+            } else if(key.equals(MAX_REDIRECTS)) {
+                rb.setMaxRedirects((Integer) value);
+            } else if(key.equals(SO_TIMEOUT)) {
+                rb.setSocketTimeout((Integer) value);
+            } else if(key.equals(CONN_TIMEOUT)) {
+                rb.setConnectTimeout((Integer) value);
+                // NOTE: Following modifying request, not builder
+            } else if(key.equals(USER_AGENT)) {
+                request.setHeader(HEADER_USERAGENT, value.toString());
+            } else if(key.equals(COMPRESSION)) {
+                request.setHeader(ACCEPT_ENCODING, value.toString());
+            } else {
+                throw new HTTPException("Unexpected setting name: " + key);
+            }
+        }
+        return rb.build();
+    }
+
+    protected Settings
+    merge(Settings globalsettings, Settings localsettings)
+    {
+        // merge global and local settings; local overrides global.
+        Settings merge = new Settings();
+        for(String key : globalsettings.getNames()) {
+            merge.setParameter(key, globalsettings.getParameter(key));
+        }
+        for(String key : localsettings.getNames()) {
+            merge.setParameter(key, localsettings.getParameter(key));
+        }
+        return merge;
     }
 
     //////////////////////////////////////////////////
