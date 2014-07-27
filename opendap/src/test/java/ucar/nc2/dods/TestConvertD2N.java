@@ -44,8 +44,8 @@ import java.util.Vector;
 
 import opendap.test.TestSources;
 import ucar.ma2.*;
+import ucar.nc2.NCdumpW;
 import ucar.nc2.Variable;
-import ucar.nc2.NCdump;
 import ucar.nc2.util.IO;
 import ucar.unidata.test.ma2.TestMa2Utils;
 
@@ -161,7 +161,7 @@ public class TestConvertD2N {
         Variable v = (Variable) vars.get(i);
         Array data = v.read();
         if (showData)
-          NCdump.printArray(data, v.getFullName()+data.shapeToString(), System.out, null);
+          NCdumpW.printArray(data, v.getFullName() + data.shapeToString(), new PrintWriter(System.out), null);
       }
     }
 
@@ -179,7 +179,7 @@ public class TestConvertD2N {
       }
 
       if (showData)
-        NCdump.printArray(data, v.getFullName()+data.shapeToString(), System.out, null);
+        NCdumpW.printArray(data, v.getFullName()+data.shapeToString(), new PrintWriter(System.out), null);
     }
 
   }

@@ -34,10 +34,8 @@
 package ucar.httpservices;
 
 import org.apache.http.*;
-import org.apache.http.auth.AuthScope;
-import org.apache.http.auth.Credentials;
-import org.apache.http.client.CredentialsProvider;
-import org.apache.http.client.HttpClient;
+import org.apache.http.auth.*;
+import org.apache.http.client.*;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.entity.DeflateDecompressingEntity;
 import org.apache.http.client.entity.GzipDecompressingEntity;
@@ -45,15 +43,23 @@ import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.client.params.AllClientPNames;
 import org.apache.http.client.protocol.ClientContext;
+import org.apache.http.client.protocol.HttpClientContext;
+import org.apache.http.config.*;
 import org.apache.http.conn.scheme.Scheme;
+import org.apache.http.conn.socket.*;
+import org.apache.http.conn.ssl.*;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.*;
 import org.apache.http.impl.conn.*;
 import org.apache.http.protocol.HttpContext;
 
+import javax.net.ssl.*;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.*;
+import java.security.*;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 import java.util.*;
 
 import static org.apache.http.auth.AuthScope.*;
@@ -315,17 +321,67 @@ public class HTTPSession
     static protected Settings globalsettings;
     static protected PoolingHttpClientConnectionManager connmgr;
 
+    // We currently only allow the use of global interceptors
     static List<HttpRequestInterceptor> reqintercepts = new ArrayList<HttpRequestInterceptor>();
     static List<HttpResponseInterceptor> rspintercepts = new ArrayList<HttpResponseInterceptor>();
 
     static {
-        connmgr = new PoolingHttpClientConnectionManager();
-        connmgr.getSchemeRegistry().register(
-            new Scheme("https", 8443,
-                new CustomSSLProtocolSocketFactory()));
-        connmgr.getSchemeRegistry().register(
-            new Scheme("https", 443,
-                new CustomSSLProtocolSocketFactory()));
+        // re: http://stackoverflow.com/a/19950935/444687
+        // and http://stackoverflow.com/a/20491564/444687
+        SSLContextBuilder builder = SSLContexts.custom();
+        try {
+            builder.loadTrustMaterial(null, new TrustStrategy()
+            {
+                @Override
+                public boolean isTrusted(X509Certificate[] chain, String authType)
+                    throws CertificateException
+                {
+                    return true;
+                }
+            });
+
+            SSLContext sslContext = builder.build();
+            SSLConnectionSocketFactory sslsf = new SSLConnectionSocketFactory(
+                sslContext, new X509HostnameVerifier()
+            {
+                @Override
+                public void verify(String host, SSLSocket ssl)
+                    throws IOException
+                {
+                }
+
+                @Override
+                public void verify(String host, X509Certificate cert)
+                    throws SSLException
+                {
+                }
+
+                @Override
+                public void verify(String host, String[] cns,
+                                   String[] subjectAlts) throws SSLException
+                {
+                }
+
+                @Override
+                public boolean verify(String s, SSLSession sslSession)
+                {
+                    return true;
+                }
+            });
+            Registry<ConnectionSocketFactory> r =
+                RegistryBuilder.<ConnectionSocketFactory>create()
+                    .register("https", sslsf)
+                    .register("http", new PlainConnectionSocketFactory())
+                    .build();
+            connmgr = new PoolingHttpClientConnectionManager(r);
+        } catch (NoSuchAlgorithmException nsae) {
+            System.err.println("Authentication exception: " + nsae);
+        } catch (KeyStoreException kse) {
+            System.err.println("Authentication exception: " + kse);
+        } catch (KeyManagementException kme) {
+            System.err.println("Authentication exception: " + kme);
+        }
+
         globalsettings = new Settings();
         setDefaults(globalsettings);
         setGlobalUserAgent(DFALTUSERAGENT);
@@ -650,11 +706,11 @@ public class HTTPSession
     protected boolean closed = false;
     protected Settings localsettings = new Settings();
     protected HTTPAuthStore authlocal = new HTTPAuthStore();
-    // We currently only allow the use of global interceptors
-    protected List<Object> intercepts = new ArrayList<Object>(); // current set of interceptors;
 
     // cached and recreated as needed
     protected CloseableHttpClient cachedclient = null;
+    protected AuthScope cachedscope = null;
+    protected URI cachedURI = null;
 
     //////////////////////////////////////////////////
     // Constructor(s)
@@ -679,36 +735,13 @@ public class HTTPSession
     //////////////////////////////////////////////////
     // Interceptors
 
-    synchronized void
-    setInterceptors()
-    {
-        if(cachedclient == null)
-            return;
-        (HttpRequestInterceptor hrq:
-    reqintercepts)
-        cachedclient.addRequestInterceptor(hrq);
-        for(HttpResponseInterceptor hrs : rspintercepts)
-            cachedclient.addResponseInterceptor(hrs);
-    }
-
-    synchronized void
-    clearInterceptors()
+    synchronized protected void
+    setInterceptors(HttpClientBuilder cb)
     {
         for(HttpRequestInterceptor hrq : reqintercepts)
-            clearInterceptor(hrq);
+            cb.addInterceptorLast(hrq);
         for(HttpResponseInterceptor hrs : rspintercepts)
-            clearInterceptor(hrs);
-    }
-
-    synchronized void
-    clearInterceptor(Object o)
-    {
-        if(cachedclient == null)
-            return;
-        if(o instanceof HttpResponseInterceptor)
-            cachedclient.removeResponseInterceptorByClass(((HttpResponseInterceptor) o).getClass());
-        if(o instanceof HttpRequestInterceptor)
-            cachedclient.removeRequestInterceptorByClass(((HttpRequestInterceptor) o).getClass());
+            cb.addInterceptorLast(hrs);
     }
 
     //////////////////////////////////////////////////
@@ -788,11 +821,8 @@ public class HTTPSession
 
     public void clearState()
     {
-        if(cachedclient == null)
-            return;
-        cachedclient.getCredentialsProvider().clear();
-        localsettings.clear();
-        authlocal.clear();
+        this.localsettings.clear();
+        this.authlocal.clear();
     }
 
     //////////////////////////////////////////////////
@@ -802,7 +832,6 @@ public class HTTPSession
     void
     setProxy(Proxy proxy)
     {
-        if(sessionClient == null) return;
         if(proxy != null && proxy.host != null)
             localsettings.setParameter(PROXY, proxy);
     }
@@ -871,38 +900,47 @@ public class HTTPSession
         }
     }
 
-    // This provides support for HTTPMethod.setAuthentication method
-    synchronized protected void
-    setAuthentication(HTTPCachingProvider hap)
-    {
-        if(this.cachedclient != null)
-            this.cachedclient.setCredentialsProvider(hap);
-        if(false)
-            this.execcontext.setAttribute(ClientContext.CREDS_PROVIDER, hap);
-    }
-
     //////////////////////////////////////////////////
     // Execution Support
 
-    protected HttpResponse
-    execute(HttpRequestBase request)
-        throws IOException
-    {
-        // Apply settings
-        setcontent(this.request);
-        AuthScope scope = setAuthentication();
-// Ensure that the client related objects exist
-        ensureHttpClient();
+    // Package visible
 
-        HttpHost target = requestHost();
-        CloseableHttpResponse response = cachedclient.execute(target, request);
+    /**
+     * Called primarily from HTTPMethod to do the bulk
+     * of the execution. Assumes HTTPMethod
+     * has inserted its headers into request.
+     */
+
+    HttpResponse
+    execute(HttpRequestBase request)
+        throws HTTPException
+    {
+        this.cachedURI = request.getURI();
+        Settings merged;
+        synchronized (this) {// keep coverity happy
+            merged = merge(globalsettings, localsettings);
+        }
+        configureRequest(request, merged);
+        HttpClientBuilder cb = HttpClients.custom();
+        HttpClientContext cc = HttpClientContext.create();
+        configClient(cb, merged);
+        setAuthentication(cc);
+        HttpHost target = httpHostFor(this.cachedURI);
+        this.cachedclient = cb.build();
+        CloseableHttpResponse response;
+        try {
+            response = cachedclient.execute(target, request, cc);
+        } catch (IOException ioe) {
+            throw new HTTPException(ioe);
+        }
+        int code = response.getStatusLine().getStatusCode();
+        // On authorization error, clear entries from the credentials cache
+        if(code == HttpStatus.SC_UNAUTHORIZED
+            || code == HttpStatus.SC_PROXY_AUTHENTICATION_REQUIRED) {
+            HTTPCachingProvider.invalidate(this.cachedscope);
+        }
         return response;
     }
-
-    protected void ensureHttpClient()
-    {
-        if(this.cachedclient != null)
-            return;
 
 /*
     ssl.TrustManagerFactory.algorithm
@@ -925,14 +963,10 @@ public class HTTPSession
     http.agent
 */
 
-
-    }
-
-    protected HttpClient
-    configureClient(Settings settings)
+    protected void
+    configClient(HttpClientBuilder cb, Settings settings)
         throws HTTPException
     {
-        HttpClientBuilder cb = HttpClients.custom();
         Object value = settings.getParameter(PROXY);
         if(value != null) {
             Proxy proxy = (Proxy) value;
@@ -942,16 +976,16 @@ public class HTTPSession
                 cb.setRoutePlanner(routePlanner);
             }
         }
-        return cb.build();
+        setInterceptors(cb);
     }
 
-
-    protected RequestConfig
+    protected void
     configureRequest(HttpRequestBase request, Settings settings)
         throws HTTPException
     {
 
         RequestConfig.Builder rb = RequestConfig.custom();
+        // Configure the RequestConfig
         for(String key : settings.getNames()) {
             Object value = settings.getParameter(key);
             boolean tf = (value instanceof Boolean ? (Boolean) value : false);
@@ -968,16 +1002,19 @@ public class HTTPSession
                 rb.setSocketTimeout((Integer) value);
             } else if(key.equals(CONN_TIMEOUT)) {
                 rb.setConnectTimeout((Integer) value);
-                // NOTE: Following modifying request, not builder
-            } else if(key.equals(USER_AGENT)) {
+            } // else ignore
+        }
+        // Configure the request
+        request.setConfig(rb.build());
+        for(String key : settings.getNames()) {
+            Object value = settings.getParameter(key);
+            boolean tf = (value instanceof Boolean ? (Boolean) value : false);
+            if(key.equals(USER_AGENT)) {
                 request.setHeader(HEADER_USERAGENT, value.toString());
             } else if(key.equals(COMPRESSION)) {
                 request.setHeader(ACCEPT_ENCODING, value.toString());
-            } else {
-                throw new HTTPException("Unexpected setting name: " + key);
-            }
+            } // else ignore
         }
-        return rb.build();
     }
 
     protected Settings
@@ -992,6 +1029,44 @@ public class HTTPSession
             merge.setParameter(key, localsettings.getParameter(key));
         }
         return merge;
+    }
+
+    /**
+     * Handle authentication.
+     * We do not know, necessarily,
+     * which scheme(s) will be
+     * encountered, so most testing
+     * occurs in HTTPAuthProvider
+     *
+     * @return an authprovider encapsulting the request
+     */
+
+    synchronized protected void
+    setAuthentication(HttpClientContext context)
+        throws HTTPException
+    {
+        // Creat a authscope from the url
+        String[] principalp = new String[1];
+        if(this.cachedURI == null)
+            this.cachedscope = HTTPAuthScope.ANY;
+        else
+            this.cachedscope = HTTPAuthScope.uriToScope(HTTPAuthPolicy.BASIC, this.cachedURI, principalp);
+
+        // Provide a credentials (provider) to enact the process
+        // We use the a caching instance so we can intercept getCredentials
+        // requests to check the cache.
+        // Changes in httpclient 4.3 may make this simpler, but for now, leave alone
+
+        HTTPCachingProvider hap = new HTTPCachingProvider(this.getAuthStore(), this.cachedscope, principalp[0]);
+
+        // New in httpclient 4.3
+        context.setCredentialsProvider(hap);
+    }
+
+    protected HttpHost
+    httpHostFor(URI uri)
+    {
+        return new HttpHost(uri.getHost(), uri.getPort(), uri.getScheme());
     }
 
     //////////////////////////////////////////////////
@@ -1055,7 +1130,7 @@ public class HTTPSession
             if(hr instanceof HTTPUtil.InterceptCommon)
                 reqintercepts.remove(i);
         }
-        for(int i=rspintercepts.size()-1;i>=0;i--) {
+        for(int i = rspintercepts.size() - 1;i >= 0;i--) {
             HttpResponseInterceptor hr = rspintercepts.get(i);
             if(hr instanceof HTTPUtil.InterceptCommon)
                 rspintercepts.remove(i);
