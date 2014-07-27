@@ -38,7 +38,6 @@ import ucar.unidata.test.util.TestDir;
 
 import java.io.*;
 
-import static junit.framework.Assert.assertEquals;
 
 /**
  * Test nc2 dods in the JUnit framework.
