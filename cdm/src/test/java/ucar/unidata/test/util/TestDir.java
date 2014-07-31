@@ -86,7 +86,7 @@ public class TestDir {
 
   private static String remoteTestServerPropName = "remotetest";
 
-  static public String remoteTestServer = "remotetest.unidata.ucar.edu";
+    static public String remoteTestServer = "remotetest.unidata.ucar.edu";
 
   // DAP4 Test server (for testing)
 
