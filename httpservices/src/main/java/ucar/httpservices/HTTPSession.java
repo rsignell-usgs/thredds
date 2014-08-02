@@ -308,6 +308,7 @@ public class HTTPSession
         }
     }
 
+
     ////////////////////////////////////////////////////////////////////////
     // Static variables
 
@@ -696,6 +697,7 @@ public class HTTPSession
 
     //////////////////////////////////////////////////
     // Interceptors
+    static protected HttpResponseInterceptor CEKILL = new HTTPUtil.ContentEncodingInterceptor();
 
     synchronized protected void
     setInterceptors(HttpClientBuilder cb)
@@ -704,6 +706,8 @@ public class HTTPSession
             cb.addInterceptorLast(hrq);
         for(HttpResponseInterceptor hrs : rspintercepts)
             cb.addInterceptorLast(hrs);
+        // Hack: add Content-Encoding suppressor
+        cb.addInterceptorFirst(CEKILL);
     }
 
     //////////////////////////////////////////////////
