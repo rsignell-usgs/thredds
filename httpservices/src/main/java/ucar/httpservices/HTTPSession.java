@@ -1000,7 +1000,6 @@ public class HTTPSession
     synchronized protected void
     setAuthentication(HttpClientBuilder cb, RequestConfig.Builder rb, Settings settings)
         throws HTTPException
-<<<<<<< HEAD
     {
         // Creat a authscope from the url
         String[] principalp = new String[1];
@@ -1078,85 +1077,6 @@ public class HTTPSession
     // Expose the state for testing purposes
     public boolean isClosed()
     {
-=======
-    {
-        // Creat a authscope from the url
-        String[] principalp = new String[1];
-        if(this.cachedURI == null)
-            this.cachedscope = HTTPAuthScope.ANY;
-        else
-            this.cachedscope = HTTPAuthScope.uriToScope(HTTPAuthPolicy.BASIC, this.cachedURI, principalp);
-
-        // Provide a credentials (provider) to enact the process
-        // We use the a caching instance so we can intercept getCredentials
-        // requests to check the cache.
-        // Changes in httpclient 4.3 may make this simpler, but for now, leave alone
-
-        HTTPCachingProvider hap = new HTTPCachingProvider(this.getAuthStore(), this.cachedscope, principalp[0]);
-        cb.setDefaultCredentialsProvider(hap);
-
-        // Handle proxy, including proxy auth.
-        Object value = settings.getParameter(PROXY);
-        if(value != null) {
-            Proxy proxy = (Proxy) value;
-            if(proxy.host != null) {
-                HttpHost httpproxy = new HttpHost(proxy.host, proxy.port);
-                // Not clear which is the correct approach
-                if(false) {
-                    DefaultProxyRoutePlanner routePlanner = new DefaultProxyRoutePlanner(httpproxy);
-                    cb.setRoutePlanner(routePlanner);
-                } else {
-                    rb.setProxy(httpproxy);
-                }
-                // Add any proxy credentials
-                if(proxy.userpwd != null) {
-                    AuthScope scope = new AuthScope(httpproxy);
-                    hap.setCredentials(scope, new UsernamePasswordCredentials(proxy.userpwd));
-                }
-
-            }
-        }
-
-        try {
-            if(truststore != null || keystore != null) {
-                SSLContextBuilder builder = SSLContexts.custom();
-                if(truststore != null) {
-                    builder.loadTrustMaterial(truststore,
-                        new TrustSelfSignedStrategy());
-                }
-                if(keystore != null) {
-                    builder.loadKeyMaterial(keystore, keypassword.toCharArray());
-                }
-                SSLContext sslcxt = builder.build();
-                SSLConnectionSocketFactory sslsf = new SSLConnectionSocketFactory(sslcxt);
-
-                cb.setSSLSocketFactory(sslsf);
-
-            }
-        } catch (KeyStoreException ke) {
-            throw new HTTPException(ke);
-        } catch (NoSuchAlgorithmException nsae) {
-            throw new HTTPException(nsae);
-        } catch (KeyManagementException kme) {
-            throw new HTTPException(kme);
-        }  catch (UnrecoverableEntryException uee) {
-            throw new HTTPException(uee);
-        }
-    }
-
-    protected HttpHost
-    httpHostFor(URI uri)
-    {
-        return new HttpHost(uri.getHost(), uri.getPort(), uri.getScheme());
-    }
-
-    //////////////////////////////////////////////////
-    // Testing support
-
-    // Expose the state for testing purposes
-    public boolean isClosed()
-    {
->>>>>>> ef110e3854aec5eebdf1b4dd03c1b28d020ecc40
         return this.closed;
     }
 
