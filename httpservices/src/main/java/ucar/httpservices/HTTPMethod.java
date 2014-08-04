@@ -536,11 +536,6 @@ public class HTTPMethod
         return ver;
     }
 
-    public String getSoTimeout()
-    {
-        return request == null ? null : "" + request.getParams().getParameter(SO_TIMEOUT);
-    }
-
     public String getStatusText()
     {
         return getStatusLine();

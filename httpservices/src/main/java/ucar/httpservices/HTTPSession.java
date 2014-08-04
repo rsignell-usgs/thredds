@@ -131,6 +131,7 @@ public class HTTPSession
     static public final String MAX_REDIRECTS = AllClientPNames.MAX_REDIRECTS;
     static public final String SO_TIMEOUT = AllClientPNames.SO_TIMEOUT;
     static public final String CONN_TIMEOUT = AllClientPNames.CONNECTION_TIMEOUT;
+    static public final String CONN_REQ_TIMEOUT = "http.connection_request.timeout";
     static public final String USER_AGENT = AllClientPNames.USER_AGENT;
     static public final String PROXY = AllClientPNames.DEFAULT_PROXY;
     static public final String COMPRESSION = "COMPRESSION";
@@ -146,9 +147,12 @@ public class HTTPSession
 
     static final int DFALTTHREADCOUNT = 50;
     static final int DFALTREDIRECTS = 25;
-    static final int DFALTCONNTIMEOUT = 1 * 60 * 1000; // 1 minutes (60000 milliseconds)
-    static final int DFALTSOTIMEOUT = 5 * 60 * 1000; // 5 minutes (300000 milliseconds)
+
     static final String DFALTUSERAGENT = "/NetcdfJava/HttpClient4.3";
+
+    static final int DFALTCONNTIMEOUT = 1 * 60 * 1000; // 1 minutes (60000 milliseconds)
+    static final int DFALTCONNREQTIMEOUT = DFALTCONNTIMEOUT;
+    static final int DFALTSOTIMEOUT = 5 * 60 * 1000; // 5 minutes (300000 milliseconds)
 
     //////////////////////////////////////////////////////////////////////////
     // Type Declarations
@@ -249,8 +253,9 @@ public class HTTPSession
 
         static public synchronized void setRetries(int retries)
         {
-            if(retries > 0)
-                RetryHandler.retries = retries;
+            if(retries <= 0)
+	        throw new IllegalArgumentException();
+            RetryHandler.retries = retries;
         }
 
         static public synchronized boolean getVerbose()
@@ -356,15 +361,11 @@ public class HTTPSession
 
         globalsettings = new Settings();
         setDefaults(globalsettings);
-        setGlobalUserAgent(DFALTUSERAGENT);
-        setGlobalThreadCount(DFALTTHREADCOUNT);
-        setGlobalConnectionTimeout(DFALTCONNTIMEOUT);
-        setGlobalSoTimeout(DFALTSOTIMEOUT);
         getGlobalProxyD(); // get info from -D if possible
         try {
             setGlobalKeyStore();
         } catch (HTTPException he) {
-            System.err.println("Global Key/Trust Store exception:"+he);
+            System.err.println("Global Key/Trust Store exception:" + he);
         }
     }
 
@@ -374,15 +375,13 @@ public class HTTPSession
     /// Provide defaults for a settings map
     static void setDefaults(Settings props)
     {
-        if(false) {// turn off for now
-            props.setParameter(HANDLE_REDIRECTS, Boolean.TRUE);
-            props.setParameter(HANDLE_AUTHENTICATION, Boolean.TRUE);
-        }
         props.setParameter(ALLOW_CIRCULAR_REDIRECTS, Boolean.TRUE);
         props.setParameter(MAX_REDIRECTS, (Integer) DFALTREDIRECTS);
         props.setParameter(SO_TIMEOUT, (Integer) DFALTSOTIMEOUT);
         props.setParameter(CONN_TIMEOUT, (Integer) DFALTCONNTIMEOUT);
+        props.setParameter(CONN_REQ_TIMEOUT, (Integer) DFALTCONNREQTIMEOUT);
         props.setParameter(USER_AGENT, DFALTUSERAGENT);
+        setGlobalThreadCount(DFALTTHREADCOUNT);
     }
 
     static synchronized public Settings getGlobalSettings()
@@ -392,6 +391,8 @@ public class HTTPSession
 
     static synchronized public void setGlobalUserAgent(String userAgent)
     {
+        if(userAgent == null || userAgent.length() == 0)
+            throw new IllegalArgumentException();
         globalsettings.setParameter(USER_AGENT, userAgent);
     }
 
@@ -402,6 +403,8 @@ public class HTTPSession
 
     static synchronized public void setGlobalThreadCount(int nthreads)
     {
+        if(nthreads <= 0)
+            throw new IllegalArgumentException();
         connmgr.setMaxTotal(nthreads);
         connmgr.setDefaultMaxPerRoute(nthreads);
     }
@@ -421,12 +424,17 @@ public class HTTPSession
 
     static synchronized public void setGlobalConnectionTimeout(int timeout)
     {
-        if(timeout >= 0) globalsettings.setParameter(CONN_TIMEOUT, (Integer) timeout);
+        if(timeout <= 0)
+            throw new IllegalArgumentException();
+        globalsettings.setParameter(CONN_TIMEOUT, (Integer) timeout);
+        globalsettings.setParameter(CONN_REQ_TIMEOUT, (Integer) timeout);
     }
 
     static synchronized public void setGlobalSoTimeout(int timeout)
     {
-        if(timeout >= 0) globalsettings.setParameter(SO_TIMEOUT, (Integer) timeout);
+        if(timeout <= 0)
+            throw new IllegalArgumentException();
+        globalsettings.setParameter(SO_TIMEOUT, (Integer) timeout);
     }
 
     // Proxy
@@ -434,6 +442,12 @@ public class HTTPSession
     static synchronized public void
     setGlobalProxy(String host, int port, String userpwd)
     {
+        if(host == null || host.length() == 0)
+            throw new IllegalArgumentException();
+        if(userpwd != null && userpwd.length() == 0)
+            userpwd = null;
+        if(userpwd != null && userpwd.indexOf(':') < 0)
+            throw new IllegalArgumentException();
         Proxy proxy = new Proxy();
         proxy.host = host;
         proxy.port = port;
@@ -458,6 +472,10 @@ public class HTTPSession
     static synchronized protected void
     defineCredentialsProvider(String principal, AuthScope scope, CredentialsProvider provider, HTTPAuthStore store)
     {
+        if(store == null || scope == null)
+            throw new IllegalArgumentException();
+        if(principal == null || principal.length() == 0)
+            principal = HTTPAuthStore.ANY_PRINCIPAL;
         // Add/remove entry to AuthStore
         try {
             if(provider == null) {//remove
@@ -653,8 +671,8 @@ public class HTTPSession
         if(userpwd != null) {
             userpwd = userpwd.trim();
             if(userpwd.length() > 0 && userpwd.indexOf(':') > 0) {
-            if(host != null)
-                setGlobalProxy(host, portno, userpwd);
+                if(host != null)
+                    setGlobalProxy(host, portno, userpwd);
             }
         }
     }
@@ -728,22 +746,30 @@ public class HTTPSession
 
     public void setUserAgent(String agent)
     {
-        if(agent != null)
-            localsettings.setParameter(USER_AGENT, agent);
+        if(agent == null || agent.length() == 0)
+            throw new IllegalArgumentException();
+        localsettings.setParameter(USER_AGENT, agent);
     }
 
     public void setSoTimeout(int timeout)
     {
-        if(timeout >= 0) localsettings.setParameter(SO_TIMEOUT, timeout);
+        if(timeout <= 0)
+            throw new IllegalArgumentException();
+        localsettings.setParameter(SO_TIMEOUT, timeout);
     }
 
     public void setConnectionTimeout(int timeout)
     {
-        if(timeout >= 0) localsettings.setParameter(CONN_TIMEOUT, timeout);
+        if(timeout <= 0)
+            throw new IllegalArgumentException();
+        localsettings.setParameter(CONN_TIMEOUT, timeout);
+        localsettings.setParameter(CONN_REQ_TIMEOUT, timeout);
     }
 
     public void setMaxRedirects(int n)
     {
+        if(n < 0) //validate
+            throw new IllegalArgumentException();
         localsettings.setParameter(MAX_REDIRECTS, n);
     }
 
@@ -942,6 +968,10 @@ public class HTTPSession
     configureRequest(HttpRequestBase request, RequestConfig.Builder rb, Settings settings)
         throws HTTPException
     {
+        // Always define these
+        rb.setExpectContinueEnabled(true);
+        rb.setAuthenticationEnabled(true);
+
         // Configure the RequestConfig
         for(String key : settings.getNames()) {
             Object value = settings.getParameter(key);
@@ -951,16 +981,17 @@ public class HTTPSession
             } else if(key.equals(HANDLE_REDIRECTS)) {
                 rb.setRedirectsEnabled(tf);
                 rb.setRelativeRedirectsAllowed(tf);
-            } else if(key.equals(HANDLE_AUTHENTICATION)) {
-                rb.setAuthenticationEnabled(tf);
             } else if(key.equals(MAX_REDIRECTS)) {
                 rb.setMaxRedirects((Integer) value);
             } else if(key.equals(SO_TIMEOUT)) {
                 rb.setSocketTimeout((Integer) value);
             } else if(key.equals(CONN_TIMEOUT)) {
                 rb.setConnectTimeout((Integer) value);
+            } else if(key.equals(CONN_REQ_TIMEOUT)) {
+                rb.setConnectionRequestTimeout((Integer) value);
             } // else ignore
         }
+
         // Configure the request directly
         for(String key : settings.getNames()) {
             Object value = settings.getParameter(key);
@@ -1060,7 +1091,7 @@ public class HTTPSession
             throw new HTTPException(nsae);
         } catch (KeyManagementException kme) {
             throw new HTTPException(kme);
-        }  catch (UnrecoverableEntryException uee) {
+        } catch (UnrecoverableEntryException uee) {
             throw new HTTPException(uee);
         }
     }
