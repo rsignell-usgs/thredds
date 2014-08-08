@@ -6256,8 +6256,6 @@ public class ToolsUI extends JPanel {
         String arg = args[i];
         System.out.println(" " + arg);
       }
-
-        HTTPSession.debugHeaders(true);
     }
 
     //////////////////////////////////////////////////////////////////////////
@@ -6309,8 +6307,6 @@ public class ToolsUI extends JPanel {
         String arg = args[i];
         System.out.println(" " + arg);
       }
-
-        HTTPSession.debugHeaders(true);
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////

@@ -289,7 +289,7 @@ public class URLDumpPane extends TextHistoryPane {
           m.setRequestContent(new StringEntity(ta.getText())); // was  setRequestContentAsString(ta.getText());
       }
 
-      m.setRequestHeader("Accept-Encoding", "gzip,deflate");
+      m.setAllowCompression();
 
       /* FIX
       appendLine("HttpClient " + m.getName() + " " + urlString);
@@ -321,6 +321,7 @@ public class URLDumpPane extends TextHistoryPane {
         if (charset == null) charset = CDM.UTF8;
         String contents = null;
 
+        /* no longer needed
         // check for deflate and gzip compression
         Header h = m.getResponseHeader("content-encoding");
         String encoding = (h == null) ? null : h.getValue();
@@ -343,6 +344,9 @@ public class URLDumpPane extends TextHistoryPane {
           byte[] body = m.getResponseAsBytes(50 * 1000); // max 50 Kbytes
           contents = new String(body, charset);
         }
+        */
+        byte[] body = m.getResponseAsBytes(50 * 1000); // max 50 Kbytes
+        contents = new String(body, charset);
 
         if (contents.length() > 50 * 1000)
           contents = contents.substring(0, 50 * 1000);

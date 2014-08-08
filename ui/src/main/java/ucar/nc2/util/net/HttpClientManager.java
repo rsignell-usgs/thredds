@@ -37,8 +37,6 @@ import org.apache.http.Header;
 import org.apache.http.entity.StringEntity;
 
 import java.io.*;
-import java.util.zip.InflaterInputStream;
-import java.util.zip.GZIPInputStream;
 
 import org.apache.http.client.CredentialsProvider;
 import ucar.nc2.util.IO;
@@ -169,7 +167,7 @@ public class HttpClientManager
 
             HTTPMethod m = HTTPFactory.Get(useSession,urlencoded);
             m.setFollowRedirects(true);
-            m.setRequestHeader("Accept-Encoding", "gzip,deflate");
+            m.setAllowCompression();
 
             int status = m.execute();
             if(status != 200) {
@@ -179,6 +177,7 @@ public class HttpClientManager
             String charset = m.getResponseCharSet();
             if(charset == null) charset = "UTF-8";
 
+            /* No longer needed
             // check for deflate and gzip compression
             Header h = m.getResponseHeader("content-encoding");
             String encoding = (h == null) ? null : h.getValue();
@@ -196,8 +195,9 @@ public class HttpClientManager
             } else {
                 byte[] body = m.getResponseAsBytes(maxKbytes * 1000);
                 return new String(body, charset);
-            }
-
+            } */
+            byte[] body = m.getResponseAsBytes(maxKbytes * 1000);
+            return new String(body, charset);
         } finally {
             if((session == null) && (useSession != null))
                 useSession.close();
@@ -227,7 +227,7 @@ public class HttpClientManager
                 useSession = HTTPFactory.newSession(urlencoded);
 
             HTTPMethod m = HTTPFactory.Get(useSession, urlencoded);
-            m.setRequestHeader("Accept-Encoding", "gzip,deflate");
+            m.setAllowCompression();
 
             int status = m.execute();
 
@@ -238,6 +238,7 @@ public class HttpClientManager
             String charset = m.getResponseCharSet();
             if (charset == null) charset = "UTF-8";
 
+            /*
             // check for deflate and gzip compression
             Header h = m.getResponseHeader("content-encoding");
             String encoding = (h == null) ? null : h.getValue();
@@ -253,6 +254,8 @@ public class HttpClientManager
             } else {
                 IO.writeToFile(m.getResponseAsStream(), file.getPath());
             }
+            */
+            IO.writeToFile(m.getResponseAsStream(), file.getPath());
 
         } finally {
             if((session == null) && (useSession != null))
@@ -278,7 +281,7 @@ public class HttpClientManager
                 useSession = HTTPFactory.newSession(urlencoded);
 
             HTTPMethod m = HTTPFactory.Get(useSession, urlencoded);
-            m.setRequestHeader("Accept-Encoding", "gzip,deflate");
+            m.setAllowCompression();
             m.setRequestHeader("Range", "bytes=" + start + "-" + end);
 
             int status = m.execute();
@@ -289,6 +292,7 @@ public class HttpClientManager
             String charset = m.getResponseCharSet();
             if(charset == null) charset = "UTF-8";
 
+            /* no longer needed
             // check for deflate and gzip compression
             Header h = m.getResponseHeader("content-encoding");
             String encoding = (h == null) ? null : h.getValue();
@@ -303,8 +307,8 @@ public class HttpClientManager
 
             } else {
                 nbytes = IO.appendToFile(m.getResponseAsStream(), file.getPath());
-            }
-
+            } */
+            nbytes = IO.appendToFile(m.getResponseAsStream(), file.getPath());
         } finally {
             if((session == null) && (useSession != null))
                 session.close();

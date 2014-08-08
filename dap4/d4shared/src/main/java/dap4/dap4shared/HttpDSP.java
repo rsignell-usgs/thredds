@@ -192,7 +192,7 @@ public class HttpDSP extends D4DSP
 
             method = HTTPFactory.Get(methodurl);
             if(allowCompression)
-                method.setRequestHeader("Accept-Encoding", "deflate,gzip");
+                method.setAllowCompression();
 
             this.status = method.execute();
 

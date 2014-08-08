@@ -189,6 +189,11 @@ public class HTTPSession
         {
             super.put(param, value);
         }
+
+        public Object removeParameter(String param)
+        {
+            return super.remove(param);
+        }
     }
 
     static class Proxy
@@ -271,14 +276,12 @@ public class HTTPSession
     static protected Settings globalsettings;
     static protected PoolingHttpClientConnectionManager connmgr;
 
-    // We currently only allow the use of global interceptors
-    static protected List<HttpRequestInterceptor> reqintercepts = new ArrayList<HttpRequestInterceptor>();
-    static protected List<HttpResponseInterceptor> rspintercepts = new ArrayList<HttpResponseInterceptor>();
-
     static protected KeyStore keystore = null;
     static protected KeyStore truststore = null;
     static protected String keypassword = null;
     static protected String trustpassword = null;
+
+    static protected Boolean globaldebugheaders = null;
 
     static {
         // re: http://stackoverflow.com/a/19950935/444687
@@ -399,17 +402,6 @@ public class HTTPSession
         globalsettings.setParameter(PROXY, proxy);
     }
 
-    // Misc.
-
-    static synchronized public void
-    setGlobalCompression()
-    {
-        globalsettings.setParameter(COMPRESSION, "gzip,deflate");
-        HttpResponseInterceptor hrsi = new GZIPResponseInterceptor();
-        rspintercepts.add(hrsi);
-        hrsi = new DeflateResponseInterceptor();
-        rspintercepts.add(hrsi);
-    }
 
     // Authorization
 
@@ -621,6 +613,18 @@ public class HTTPSession
         }
     }
 
+    static synchronized public void
+    setGlobalDebugHeaders(boolean print)
+    {
+        globaldebugheaders = new Boolean(print);
+    }
+
+    static synchronized public void
+    resetGlobalDebugHeaders()
+    {
+        globaldebugheaders = null;
+    }
+
     //////////////////////////////////////////////////
     // Instance variables
 
@@ -630,6 +634,10 @@ public class HTTPSession
     protected boolean closed = false;
     protected Settings localsettings = new Settings();
     protected HTTPAuthStore authlocal = new HTTPAuthStore();
+
+    // We currently only allow the use of HTTPSession instance interceptors
+    protected List<HttpRequestInterceptor> reqintercepts = new ArrayList<HttpRequestInterceptor>();
+    protected List<HttpResponseInterceptor> rspintercepts = new ArrayList<HttpResponseInterceptor>();
 
     // cached and recreated as needed
     protected CloseableHttpClient cachedclient = null;
@@ -655,12 +663,37 @@ public class HTTPSession
             throw new HTTPException("Malformed URL: " + url, mue);
         }
         this.legalurl = url;
+        if(globaldebugheaders != null)
+            debugHeaders(globaldebugheaders.booleanValue());
     }
 
     //////////////////////////////////////////////////
     // Interceptors
 
-    synchronized protected void
+    public void
+    setAllowCompression()
+    {
+        localsettings.setParameter(COMPRESSION, "gzip,deflate");
+        HttpResponseInterceptor hrsi = new GZIPResponseInterceptor();
+        rspintercepts.add(hrsi);
+        hrsi = new DeflateResponseInterceptor();
+        rspintercepts.add(hrsi);
+    }
+
+    public void
+    removeCompression()
+    {
+        if(localsettings.removeParameter(COMPRESSION) != null) {
+            for(int i = rspintercepts.size() - 1; i >= 0; i--) { // walk backwards
+                HttpResponseInterceptor hrsi = rspintercepts.get(i);
+                if(hrsi instanceof GZIPResponseInterceptor
+                        || hrsi instanceof DeflateResponseInterceptor)
+                    rspintercepts.remove(i);
+            }
+        }
+    }
+
+    protected void
     setInterceptors(HttpClientBuilder cb)
     {
         for(HttpRequestInterceptor hrq : reqintercepts) {
@@ -908,7 +941,7 @@ public class HTTPSession
     {
         setInterceptors(cb);
         // Set retries
-        cb.setRetryHandler(new DefaultHttpRequestRetryHandler(DFALTRETRIES,false));
+        cb.setRetryHandler(new DefaultHttpRequestRetryHandler(DFALTRETRIES, false));
         cb.setServiceUnavailableRetryStrategy(new DefaultServiceUnavailableRetryStrategy(DFALTUNAVAILRETRIES, DFALTUNAVAILINTERVAL));
     }
 
@@ -1099,7 +1132,8 @@ public class HTTPSession
         sessionList.add(session);
     }
 
-    static public void debugHeaders(boolean print)
+    public void
+    debugHeaders(boolean print)
     {
         HTTPUtil.InterceptRequest rq = new HTTPUtil.InterceptRequest();
         HTTPUtil.InterceptResponse rs = new HTTPUtil.InterceptResponse();
@@ -1120,7 +1154,7 @@ public class HTTPSession
         rspintercepts.add(rs);
     }
 
-    public static void
+    public void
     debugReset()
     {
         for(HttpRequestInterceptor hri : reqintercepts) {
@@ -1129,7 +1163,7 @@ public class HTTPSession
         }
     }
 
-    public static HTTPUtil.InterceptRequest
+    public HTTPUtil.InterceptRequest
     debugRequestInterceptor()
     {
         for(HttpRequestInterceptor hri : reqintercepts) {
@@ -1139,7 +1173,7 @@ public class HTTPSession
         return null;
     }
 
-    public static HTTPUtil.InterceptResponse
+    public HTTPUtil.InterceptResponse
     debugResponseInterceptor()
     {
         for(HttpResponseInterceptor hri : rspintercepts) {
