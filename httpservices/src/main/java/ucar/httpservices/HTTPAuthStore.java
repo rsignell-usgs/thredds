@@ -151,6 +151,13 @@ public class HTTPAuthStore implements Serializable
                 return false;
             return (compareTo((Entry)o) == 0);
         }
+
+        public int
+        hashcode()
+	{
+	    return this.principal.hashcode();
+        }
+
     }
 
     //////////////////////////////////////////////////
