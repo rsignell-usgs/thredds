@@ -153,9 +153,9 @@ public class HTTPAuthStore implements Serializable
         }
 
         public int
-        hashcode()
+        hashCode()
 	{
-	    return this.principal.hashcode();
+	    return this.principal.hashCode();
         }
 
     }
